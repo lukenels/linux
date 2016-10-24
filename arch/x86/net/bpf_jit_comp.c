@@ -1085,6 +1085,11 @@ common_load:
 	return proglen;
 }
 
+static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
+{
+	return -1;
+}
+
 void bpf_jit_compile(struct bpf_prog *prog)
 {
 }
@@ -1097,7 +1102,6 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	struct jit_context ctx = {};
 	bool tmp_blinded = false;
 	u8 *image = NULL;
-	int *addrs;
 	int pass;
 	int i;
 
@@ -1115,53 +1119,23 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = tmp;
 	}
 
-	addrs = kmalloc(prog->len * sizeof(*addrs), GFP_KERNEL);
-	if (!addrs) {
+	proglen = 64 * prog->len;
+	ctx.cleanup_addr = proglen;
+
+	// Use Ouroboros JIT
+	header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
+	if (!header) {
 		prog = orig_prog;
 		goto out;
 	}
 
-	/* Before first pass, make a rough estimation of addrs[]
-	 * each bpf instruction is translated to less than 64 bytes
-	 */
-	for (proglen = 0, i = 0; i < prog->len; i++) {
-		proglen += 64;
-		addrs[i] = proglen;
-	}
-	ctx.cleanup_addr = proglen;
-
-	/* JITed image shrinks with every pass and the loop iterates
-	 * until the image stops shrinking. Very large bpf programs
-	 * may converge on the last pass. In such case do one more
-	 * pass to emit the final image
-	 */
-	for (pass = 0; pass < 10 || image; pass++) {
-		proglen = do_jit(prog, addrs, image, oldproglen, &ctx);
-		if (proglen <= 0) {
-			image = NULL;
-			if (header)
-				bpf_jit_binary_free(header);
-			prog = orig_prog;
-			goto out_addrs;
-		}
-		if (image) {
-			if (proglen != oldproglen) {
-				pr_err("bpf_jit: proglen=%d != oldproglen=%d\n",
-				       proglen, oldproglen);
-				prog = orig_prog;
-				goto out_addrs;
-			}
-			break;
-		}
-		if (proglen == oldproglen) {
-			header = bpf_jit_binary_alloc(proglen, &image,
-						      1, jit_fill_hole);
-			if (!header) {
-				prog = orig_prog;
-				goto out_addrs;
-			}
-		}
-		oldproglen = proglen;
+	proglen = ouro_jit(prog, image, &ctx);
+	if (proglen <= 0) {
+		image = NULL;
+		if (header)
+			bpf_jit_binary_free(header);
+		prog = orig_prog;
+		goto out;
 	}
 
 	if (bpf_jit_enable > 1)
