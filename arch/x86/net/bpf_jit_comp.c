@@ -1098,12 +1098,11 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_binary_header *header = NULL;
 	struct bpf_prog *tmp, *orig_prog = prog;
-	int proglen, oldproglen = 0;
+	int proglen = 0;
 	struct jit_context ctx = {};
 	bool tmp_blinded = false;
 	u8 *image = NULL;
 	int pass;
-	int i;
 
 	if (!bpf_jit_enable)
 		return orig_prog;
@@ -1150,8 +1149,6 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 	}
 
-out_addrs:
-	kfree(addrs);
 out:
 	if (tmp_blinded)
 		bpf_jit_prog_release_other(prog, prog == orig_prog ?
