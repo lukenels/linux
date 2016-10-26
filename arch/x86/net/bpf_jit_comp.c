@@ -1104,6 +1104,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	u8 *image = NULL;
 	int pass;
 
+	pr_warn("bpf_jit_enable = %d\n", bpf_jit_enable);
+
 	if (!bpf_jit_enable)
 		return orig_prog;
 
@@ -1120,6 +1122,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 
 	proglen = 64 * prog->len;
 	ctx.cleanup_addr = proglen;
+
+	pr_warn("proglen = %d\n", proglen);
 
 	// Use Ouroboros JIT
 	header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
