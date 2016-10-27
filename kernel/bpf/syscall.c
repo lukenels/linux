@@ -822,6 +822,8 @@ static int bpf_prog_load(union bpf_attr *attr)
 	char license[128];
 	bool is_gpl;
 
+	pr_warn("ouro: bpf_prog_load | bpf_attr = %p\n", attr);
+
 	if (CHECK_ATTR(BPF_PROG_LOAD))
 		return -EINVAL;
 
@@ -998,6 +1000,8 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 {
 	union bpf_attr attr = {};
 	int err;
+
+	pr_warn("ouro: bpf syscall invoked with cmd = %d\n", cmd);
 
 	if (!capable(CAP_SYS_ADMIN) && sysctl_unprivileged_bpf_disabled)
 		return -EPERM;

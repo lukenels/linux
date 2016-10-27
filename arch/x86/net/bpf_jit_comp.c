@@ -1104,7 +1104,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	u8 *image = NULL;
 	int pass;
 
-	pr_warn("bpf_jit_enable = %d\n", bpf_jit_enable);
+	pr_warn("ouro: bpf_jit_enable = %d\n", bpf_jit_enable);
 
 	if (!bpf_jit_enable)
 		return orig_prog;
@@ -1123,7 +1123,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	proglen = 64 * prog->len;
 	ctx.cleanup_addr = proglen;
 
-	pr_warn("proglen = %d\n", proglen);
+	pr_warn("ouro: proglen = %d\n", proglen);
 
 	// Use Ouroboros JIT
 	header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
@@ -1131,6 +1131,9 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 		goto out;
 	}
+
+	pr_warn("Allocated bpf mem at %p\n", header);
+	pr_warn("Image is located at %p\n", image);
 
 	proglen = ouro_jit(prog, image, &ctx);
 	if (proglen <= 0) {
