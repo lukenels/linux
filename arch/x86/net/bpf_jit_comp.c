@@ -1099,13 +1099,13 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_binary_header *header = NULL;
 	struct bpf_prog *tmp, *orig_prog = prog;
-	int proglen = 0;
+	int proglen, oldproglen = 0;
 	struct jit_context ctx = {};
 	bool tmp_blinded = false;
 	u8 *image = NULL;
+	int *addrs;
 	int pass;
-
-	pr_warn("ouro: bpf_jit_enable = %d\n", bpf_jit_enable);
+	int i;
 
 	if (!bpf_jit_enable)
 		return orig_prog;
@@ -1121,28 +1121,80 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = tmp;
 	}
 
-	proglen = 64 * prog->len;
-	ctx.cleanup_addr = proglen;
 
-	pr_warn("ouro: proglen = %d\n", proglen);
-
-	// Use Ouroboros JIT
-	header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
-	if (!header) {
+	addrs = kmalloc(prog->len * sizeof(*addrs), GFP_KERNEL);
+	if (!addrs) {
 		prog = orig_prog;
 		goto out;
 	}
 
-	pr_warn("Allocated bpf mem at %p\n", header);
-	pr_warn("Image is located at %p\n", image);
+	if (bpf_jit_ouro > 0) {
 
-	proglen = ouro_jit(prog, image, &ctx);
-	if (proglen <= 0) {
-		image = NULL;
-		if (header)
-			bpf_jit_binary_free(header);
-		prog = orig_prog;
-		goto out;
+		pr_info("ouro: Using Ouroboros to JIT code\n");
+
+		header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
+		if (!header) {
+			prog = orig_prog;
+			goto out_addrs;
+		}
+
+		proglen = prog->len * 64;
+
+		proglen = ouro_jit(prog, image, &ctx);
+		pr_info("ouro: ouro_jit returned %d\n", proglen);
+
+		if (proglen < 0) {
+			prog = orig_prog;
+			goto out_addrs;
+		}
+
+	} else {
+
+		pr_info("ouro: Not using Ouroboros to JIT code\n");
+
+		/* Before first pass, make a rough estimation of addrs[]
+		 * each bpf instruction is translated to less than 64 bytes
+		 */
+		for (proglen = 0, i = 0; i < prog->len; i++) {
+			proglen += 64;
+			addrs[i] = proglen;
+		}
+		ctx.cleanup_addr = proglen;
+
+		/* JITed image shrinks with every pass and the loop iterates
+		 * until the image stops shrinking. Very large bpf programs
+		 * may converge on the last pass. In such case do one more
+		 * pass to emit the final image
+		 */
+		for (pass = 0; pass < 10 || image; pass++) {
+			proglen = do_jit(prog, addrs, image, oldproglen, &ctx);
+			if (proglen <= 0) {
+				image = NULL;
+				if (header)
+					bpf_jit_binary_free(header);
+				prog = orig_prog;
+				goto out_addrs;
+			}
+			if (image) {
+				if (proglen != oldproglen) {
+					pr_err("bpf_jit: proglen=%d != oldproglen=%d\n",
+						   proglen, oldproglen);
+					prog = orig_prog;
+					goto out_addrs;
+				}
+				break;
+			}
+			if (proglen == oldproglen) {
+				header = bpf_jit_binary_alloc(proglen, &image,
+								  1, jit_fill_hole);
+				if (!header) {
+					prog = orig_prog;
+					goto out_addrs;
+				}
+			}
+			oldproglen = proglen;
+		}
+
 	}
 
 	if (bpf_jit_enable > 1)
@@ -1157,6 +1209,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 		prog = orig_prog;
 	}
 
+out_addrs:
+	kfree(addrs);
 out:
 	if (tmp_blinded)
 		bpf_jit_prog_release_other(prog, prog == orig_prog ?
