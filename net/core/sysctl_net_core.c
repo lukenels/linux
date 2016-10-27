@@ -296,6 +296,12 @@ static struct ctl_table net_core_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
+	},{
+		.procname   = "bpf_jit_ouro",
+		.data       = &bpf_jit_ouro,
+		.maxlen     = sizeof(int),
+		.mode       = 0644,
+		.proc_handler  = proc_dointvec
 	},
 # ifdef CONFIG_HAVE_EBPF_JIT
 	{
