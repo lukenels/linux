@@ -154,3 +154,8 @@ bpf_error:
 	mov	- MAX_BPF_STACK + 24(%rbp),%r15
 	leaveq
 	ret
+
+## Ouroboros
+
+ouro_blob:
+.incbin "arch/x86/net/ouro_blob.bin"
