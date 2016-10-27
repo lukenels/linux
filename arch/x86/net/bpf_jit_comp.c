@@ -1086,9 +1086,13 @@ common_load:
 	return proglen;
 }
 
+extern u8 ouro_jit_stub[];
+
 static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 {
-	return -1;
+	int res;
+	asm volatile ("call *%%rax" : "=a" (res) : "a" (ouro_jit_stub) : "memory", "cc");
+	return res;
 }
 
 void bpf_jit_compile(struct bpf_prog *prog)

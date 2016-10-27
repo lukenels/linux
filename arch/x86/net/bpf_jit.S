@@ -157,5 +157,9 @@ bpf_error:
 
 ## Ouroboros
 
+FUNC(ouro_jit_stub)
+	movq $-42, %rax
+	retq
+
 ouro_blob:
 .incbin "arch/x86/net/ouro_blob.bin"
