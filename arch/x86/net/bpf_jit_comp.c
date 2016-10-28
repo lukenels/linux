@@ -1128,6 +1128,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	u8 *image = NULL;
 	int *addrs;
 	int pass;
+	int err;
 	int i;
 
 	if (!bpf_jit_enable)
@@ -1163,9 +1164,9 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 
 		proglen = prog->len * 64;
 
-		ouro_jit(prog, image, &ctx);
+		err = ouro_jit(prog, image, &ctx);
 
-		if (proglen < 0) {
+		if (err < 0) {
 			prog = orig_prog;
 			goto out_addrs;
 		}
