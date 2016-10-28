@@ -1110,7 +1110,7 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 	if (err != 0) {
 		return -1;
 	} else {
-		return 64 * prog->len;
+		return 0;
 	}
 }
 
@@ -1163,8 +1163,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 
 		proglen = prog->len * 64;
 
-		proglen = ouro_jit(prog, image, &ctx);
-		pr_info("ouro: ouro_jit returned %d\n", proglen);
+		ouro_jit(prog, image, &ctx);
 
 		if (proglen < 0) {
 			prog = orig_prog;
