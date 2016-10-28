@@ -1090,9 +1090,28 @@ extern u8 ouro_jit_stub[];
 
 static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 {
-	int res;
-	asm volatile ("call *%%rax" : "=a" (res) : "a" (ouro_jit_stub) : "memory", "cc");
-	return res;
+	int err;
+
+	/* To stub:
+	 *   %rbx : pointer to output image
+	 *   %rcx : pointer to input program
+	 *   %rdx : number of eBPF instructions to compile
+	 * From stub:
+	 *   %rax : Error code from compiler
+	 */
+
+	asm volatile (
+		"call *%%rax" :
+		"=a" (err) :
+		"a" (ouro_jit_stub), "b" (image), "c" (prog->insnsi), "d" (prog->len) :
+		"memory", "cc");
+
+	pr_info("Ouro error code = %d\n", err);
+	if (err != 0) {
+		return -1;
+	} else {
+		return 64 * prog->len;
+	}
 }
 
 void bpf_jit_compile(struct bpf_prog *prog)
