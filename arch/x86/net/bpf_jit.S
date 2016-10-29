@@ -157,6 +157,96 @@ bpf_error:
 
 ## Ouroboros
 
+.global ouro_prologue_start
+ouro_prologue_start:
+
+	# Register saving
+	## These register are saved by linux, we must save them too
+	pushq %rbx
+	pushq %r13
+	pushq %r14
+	pushq %r15
+	## These registers we use, but linux does not expect us to use them.
+	## They must be saved
+	pushq %rbp
+	pushq %r11
+	pushq %r12
+	pushq %r9
+	pushq %r10
+
+	xor %rax, %rax
+	
+	# Calling convention conversion
+	pushq %rax
+	pushq %rdi
+	pushq %rsi
+	pushq %rdx
+	pushq %rcx
+	pushq %r8
+	pushq %rbx
+	pushq %r13
+	pushq %r14
+	pushq %r15
+	pushq %rbp
+	popq %r10
+	popq %r9
+	popq %r8
+	popq %rdi
+	popq %rsi
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	popq %r11
+	popq %rbp
+
+.global ouro_prologue_end
+ouro_prologue_end:
+
+.global ouro_epilogue_start
+ouro_epilogue_start:
+
+	# First, convert the calling convention back to normal
+	pushq %r10
+	pushq %r9
+	pushq %r8
+	pushq %rdi
+	pushq %rsi
+	pushq %r15
+	pushq %r14
+	pushq %r13
+	pushq %r12
+	pushq %r11
+	pushq %rbp
+	popq %rax
+	popq %rdi
+	popq %rsi
+	popq %rdx
+	popq %rcx
+	popq %r8
+	popq %rbx
+	popq %r13
+	popq %r14
+	popq %r15
+	popq %rbp
+	
+	popq %r10
+	popq %r9
+	popq %r12
+	popq %r11
+	popq %rbp
+
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %rbx
+	
+	retq
+
+
+.global ouro_epilogue_end
+ouro_epilogue_end:
+
 FUNC(ouro_jit_stub)
 
 	# Save registers

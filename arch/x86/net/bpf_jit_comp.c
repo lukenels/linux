@@ -1086,11 +1086,13 @@ common_load:
 	return proglen;
 }
 
-extern u8 ouro_jit_stub[];
+extern u8 ouro_jit_stub[], ouro_prologue_start[], ouro_prologue_end[],
+	ouro_epilogue_start[], ouro_epilogue_end[];
 
 static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 {
 	int err;
+	int written = 0;
 
 	/* To stub:
 	 *   %rbx : pointer to output image
@@ -1099,7 +1101,16 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 	 * From stub:
 	 *   %rax : Error code from compiler
 	 */
+	
+	int prologue_size = ouro_prologue_end - ouro_prologue_start;
+	int epilogue_size = ouro_epilogue_end - ouro_epilogue_start;
+	
+	/* Write the prologue */
+	memcpy(image, ouro_prologue_start, prologue_size);
+	written += prologue_size;
+	image += prologue_size;
 
+	/* Run the compiler */
 	asm volatile (
 		"call *%%rax" :
 		"=a" (err) :
@@ -1107,11 +1118,19 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 		"memory", "cc");
 
 	pr_info("Ouro error code = %d\n", err);
-	if (err != 0) {
+	if (err != 0)
 		return -1;
-	} else {
-		return 0;
-	}
+
+	/* This is some hacky bullshit plz ignore */
+	image += 64 * (prog->len - 1);
+	written += 64 * (prog->len - 1);
+
+	/* Write the epilogue */
+	memcpy(image, ouro_epilogue_start, epilogue_size);
+	written += epilogue_size;
+	image += epilogue_size;
+
+	return written;
 }
 
 void bpf_jit_compile(struct bpf_prog *prog)
@@ -1128,7 +1147,6 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	u8 *image = NULL;
 	int *addrs;
 	int pass;
-	int err;
 	int i;
 
 	if (!bpf_jit_enable)
@@ -1156,17 +1174,15 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 
 		pr_info("ouro: Using Ouroboros to JIT code\n");
 
-		header = bpf_jit_binary_alloc(proglen, &image, 1, jit_fill_hole);
+		header = bpf_jit_binary_alloc(64 * prog->len + 256, &image, 1, jit_fill_hole);
 		if (!header) {
 			prog = orig_prog;
 			goto out_addrs;
 		}
 
-		proglen = prog->len * 64;
+		proglen = ouro_jit(prog, image, &ctx);
 
-		err = ouro_jit(prog, image, &ctx);
-
-		if (err < 0) {
+		if (proglen < 0) {
 			prog = orig_prog;
 			goto out_addrs;
 		}
