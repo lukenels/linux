@@ -189,18 +189,18 @@ FUNC(ouro_jit_stub)
 	movq %rcx, %rbp
 	movq %rdx, %r12
 
-	movq $0, %rax
-	movq $0, %rbx
-	movq $0, %rcx
-	movq $0, %rdx
-	movq $0, %rdi
-	movq $0, %rsi
-	movq $0, %r8
-	movq $0, %r9
-	movq $0, %r10
-	movq $0, %r13
-	movq $0, %r14
-	movq $0, %r15
+	xor %rax, %rax
+	xor %rbx, %rbx
+	xor %rcx, %rcx
+	xor %rdx, %rdx
+	xor %rdi, %rdi
+	xor %rsi, %rsi
+	xor %r8, %r8
+	xor %r9, %r9
+	xor %r10, %r10
+	xor %r13, %r13
+	xor %r14, %r14
+	xor %r15, %r15
 	
 	call ouro_blob	
 
