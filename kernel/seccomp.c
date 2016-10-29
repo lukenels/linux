@@ -20,6 +20,7 @@
 #include <linux/seccomp.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
+#include <linux/bpf.h>
 
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
 #include <asm/syscall.h>
@@ -334,6 +335,97 @@ static inline void seccomp_sync_threads(void)
 		if (thread->seccomp.mode == SECCOMP_MODE_DISABLED)
 			seccomp_assign_mode(thread, SECCOMP_MODE_FILTER);
 	}
+}
+
+static const struct bpf_func_proto *
+seccomp_filter_func_proto(enum bpf_func_id func_id)
+{
+	switch (func_id) {
+	default:
+		return NULL;
+	}
+}
+
+static bool seccomp_filter_is_valid_access(int off, int size,
+				      enum bpf_access_type type,
+				      enum bpf_reg_type *reg_type)
+{
+	return false;
+}
+
+static u32 seccomp_filter_convert_ctx_access(enum bpf_access_type type, int dst_reg,
+					int src_reg, int ctx_off,
+					struct bpf_insn *insn_buf,
+					struct bpf_prog *prog)
+{
+	return 0; /* FIXME is this right? */
+}
+
+static const struct bpf_verifier_ops seccomp_filter_ops = {
+	.get_func_proto		= seccomp_filter_func_proto,
+	.is_valid_access	= seccomp_filter_is_valid_access,
+	.convert_ctx_access	= seccomp_filter_convert_ctx_access,
+};
+
+static struct bpf_prog_type_list seccomp_filter_type __read_mostly = {
+	.ops	= &seccomp_filter_ops,
+	.type	= BPF_PROG_TYPE_SECCOMP_FILTER,
+};
+
+static int __init register_seccomp_filter_ops(void)
+{
+	bpf_register_prog_type(&seccomp_filter_type);
+	return 0;
+}
+late_initcall(register_seccomp_filter_ops);
+
+static struct seccomp_filter *
+seccomp_prepare_bpf(u32 ufd)
+{
+	struct seccomp_filter *sfilter;
+	struct bpf_prog *prog;
+
+	pr_err("seccomp_prepare_bpf not implemented\n");
+	pr_err("fd = %d\n", ufd);
+
+	/*
+	 * Installing a seccomp filter requires that the task has
+	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
+	 * This avoids scenarios where unprivileged tasks can affect the
+	 * behavior of privileged children.
+	 */
+	if (!task_no_new_privs(current) &&
+	    security_capable_noaudit(current_cred(), current_user_ns(),
+				     CAP_SYS_ADMIN) != 0)
+		return ERR_PTR(-EACCES);
+
+	/* Find the filter */
+	prog = bpf_prog_get_type(ufd, BPF_PROG_TYPE_SECCOMP_FILTER);
+	if (IS_ERR(prog))
+		return ERR_PTR(-EINVAL);
+
+	/* Allocate a new seccomp_filter */
+	sfilter = kzalloc(sizeof(*sfilter), GFP_KERNEL | __GFP_NOWARN);
+	if (!sfilter)
+		return ERR_PTR(-ENOMEM);
+
+	sfilter->prog = prog;
+	atomic_set(&sfilter->usage, 1);
+
+	pr_err("Created the sfilter from prog with fd %d\n", ufd);
+	return sfilter;
+}
+
+static struct seccomp_filter *
+seccomp_prepare_user_bpf(const char __user *user_filter)
+{
+	u32 ufd;
+	struct seccomp_filter *filter = ERR_PTR(-EFAULT);
+	if (copy_from_user(&ufd, user_filter, sizeof(ufd)))
+		goto out;
+	filter = seccomp_prepare_bpf(ufd);
+out:
+	return filter;
 }
 
 /**
@@ -725,7 +817,7 @@ out:
  *
  * Returns 0 on success or -EINVAL on failure.
  */
-static long seccomp_set_mode_filter(unsigned int flags,
+static long seccomp_set_mode_filter(unsigned int op, unsigned int flags,
 				    const char __user *filter)
 {
 	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
@@ -737,7 +829,17 @@ static long seccomp_set_mode_filter(unsigned int flags,
 		return -EINVAL;
 
 	/* Prepare the new filter before holding any locks. */
-	prepared = seccomp_prepare_user_filter(filter);
+	switch (op) {
+	case SECCOMP_SET_MODE_FILTER:
+		prepared = seccomp_prepare_user_filter(filter);
+		break;
+	case SECCOMP_SET_MODE_BPF:
+		prepared = seccomp_prepare_user_bpf(filter);
+		break;
+	default:
+		panic("Unreachable state\n");
+	}
+
 	if (IS_ERR(prepared))
 		return PTR_ERR(prepared);
 
@@ -787,7 +889,10 @@ static long do_seccomp(unsigned int op, unsigned int flags,
 			return -EINVAL;
 		return seccomp_set_mode_strict();
 	case SECCOMP_SET_MODE_FILTER:
-		return seccomp_set_mode_filter(flags, uargs);
+		return seccomp_set_mode_filter(op, flags, uargs);
+	case SECCOMP_SET_MODE_BPF:
+		pr_err("SECCOMP_SET_MODE_BPF not supported yet; who knows what'll happen\n");
+		return seccomp_set_mode_filter(op, flags, uargs);
 	default:
 		return -EINVAL;
 	}
