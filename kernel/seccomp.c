@@ -411,7 +411,6 @@ seccomp_prepare_bpf(u32 ufd)
 	struct seccomp_filter *sfilter;
 	struct bpf_prog *prog;
 
-	pr_err("seccomp_prepare_bpf not implemented\n");
 	pr_err("fd = %d\n", ufd);
 
 	/*
@@ -438,7 +437,6 @@ seccomp_prepare_bpf(u32 ufd)
 	sfilter->prog = prog;
 	atomic_set(&sfilter->usage, 1);
 
-	pr_err("Created the sfilter from prog with fd %d\n", ufd);
 	return sfilter;
 }
 
