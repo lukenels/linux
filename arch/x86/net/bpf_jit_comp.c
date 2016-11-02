@@ -1139,7 +1139,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	bool tmp_blinded = false;
 	u8 *image = NULL;
 	int *addrs;
-	int pass;
+	int pass = 0;
 	int i;
 
 	if (!bpf_jit_enable)
