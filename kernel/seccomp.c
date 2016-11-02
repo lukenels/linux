@@ -21,6 +21,7 @@
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 #include <linux/bpf.h>
+#include <linux/filter.h>
 
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
 #include <asm/syscall.h>
@@ -374,7 +375,16 @@ static u32 seccomp_filter_convert_ctx_access(enum bpf_access_type type, int dst_
 					struct bpf_insn *insn_buf,
 					struct bpf_prog *prog)
 {
-	return 0; /* FIXME is this right? */
+	struct bpf_insn *insn = insn_buf;
+
+	switch (ctx_off) {
+	case offsetof(struct seccomp_data, nr):
+		*insn++ = BPF_LDX_MEM(BPF_W, dst_reg, src_reg,
+					offsetof(struct seccomp_data, nr));
+		break;
+	}
+
+	return insn - insn_buf;
 }
 
 static const struct bpf_verifier_ops seccomp_filter_ops = {
