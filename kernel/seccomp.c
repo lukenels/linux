@@ -350,7 +350,23 @@ static bool seccomp_filter_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
 				      enum bpf_reg_type *reg_type)
 {
-	return false;
+	/* Reject all writes */
+	if (type != BPF_READ)
+		return false;
+	if (off < 0 || off >= sizeof(struct seccomp_data))
+		return false;
+
+	switch (off) {
+	case offsetof(struct seccomp_data, nr):
+		return size == sizeof(((struct seccomp_data *) NULL)->nr);
+	case offsetof(struct seccomp_data, arch):
+		return size == sizeof(((struct seccomp_data *) NULL)->arch);
+	case offsetof(struct seccomp_data, instruction_pointer):
+		return size == sizeof(((struct seccomp_data *) NULL)->instruction_pointer);
+	/* TODO handle seccomp_data.args */
+	default:
+		return false;
+	}
 }
 
 static u32 seccomp_filter_convert_ctx_access(enum bpf_access_type type, int dst_reg,
