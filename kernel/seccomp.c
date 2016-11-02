@@ -915,7 +915,6 @@ static long do_seccomp(unsigned int op, unsigned int flags,
 	case SECCOMP_SET_MODE_FILTER:
 		return seccomp_set_mode_filter(op, flags, uargs);
 	case SECCOMP_SET_MODE_BPF:
-		pr_err("SECCOMP_SET_MODE_BPF not supported yet; who knows what'll happen\n");
 		return seccomp_set_mode_filter(op, flags, uargs);
 	default:
 		return -EINVAL;
