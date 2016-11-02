@@ -1087,7 +1087,7 @@ common_load:
 }
 
 extern u8 ouro_jit_stub[], ouro_prologue_start[], ouro_prologue_end[],
-	ouro_epilogue_start[], ouro_epilogue_end[];
+	ouro_epilogue[];
 
 static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 {
@@ -1103,7 +1103,6 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 	 */
 	
 	int prologue_size = ouro_prologue_end - ouro_prologue_start;
-	int epilogue_size = ouro_epilogue_end - ouro_epilogue_start;
 	
 	/* Write the prologue */
 	memcpy(image, ouro_prologue_start, prologue_size);
@@ -1121,14 +1120,8 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 	if (err != 0)
 		return -1;
 
-	/* This is some hacky bullshit plz ignore */
-	image += 64 * (prog->len - 1);
-	written += 64 * (prog->len - 1);
-
-	/* Write the epilogue */
-	memcpy(image, ouro_epilogue_start, epilogue_size);
-	written += epilogue_size;
-	image += epilogue_size;
+	image += 64 * prog->len;
+	written += 64 * prog->len;
 
 	return written;
 }

@@ -200,11 +200,14 @@ ouro_prologue_start:
 	popq %r11
 	popq %rbp
 
+	pushq $(ouro_epilogue) # Push return address for ouro
+
 .global ouro_prologue_end
 ouro_prologue_end:
 
-.global ouro_epilogue_start
-ouro_epilogue_start:
+# Force JITed code to return to this epilogue
+.global ouro_epilogue
+ouro_epilogue:
 
 	# First, convert the calling convention back to normal
 	pushq %r10
@@ -242,10 +245,6 @@ ouro_epilogue_start:
 	popq %rbx
 	
 	retq
-
-
-.global ouro_epilogue_end
-ouro_epilogue_end:
 
 FUNC(ouro_jit_stub)
 
