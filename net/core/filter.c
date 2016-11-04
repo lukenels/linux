@@ -894,7 +894,8 @@ static void bpf_release_orig_filter(struct bpf_prog *fp)
 
 static void __bpf_prog_release(struct bpf_prog *prog)
 {
-	if (prog->type == BPF_PROG_TYPE_SOCKET_FILTER) {
+	if (prog->type == BPF_PROG_TYPE_SOCKET_FILTER ||
+		prog->type == BPF_PROG_TYPE_SECCOMP_FILTER) {
 		bpf_prog_put(prog);
 	} else {
 		bpf_release_orig_filter(prog);
