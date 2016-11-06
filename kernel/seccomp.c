@@ -168,15 +168,6 @@ static int seccomp_check_filter(struct sock_filter *filter, unsigned int flen)
 	return 0;
 }
 
-static inline u64 rdtscp(u32 *auxout)
-{
-	u32 low, high, aux;
-	asm("rdtscp" : "=d" (high), "=a" (low), "=c" (aux));
-	if (auxout)
-		*auxout = aux;
-	return ((u64) high) << 32 | (u64) low;
-}
-
 /**
  * seccomp_run_filters - evaluates all seccomp filters against @sd
  * @sd: optional seccomp data to be passed to filters
@@ -187,7 +178,8 @@ static u32 seccomp_run_filters(const struct seccomp_data *sd)
 {
 	struct seccomp_data sd_local;
 	u32 ret = SECCOMP_RET_ALLOW;
-	unsigned long long begin, end;
+	struct timeval begin, end;
+
 	/* Make sure cross-thread synced filter points somewhere sane. */
 	struct seccomp_filter *f =
 			lockless_dereference(current->seccomp.filter);
@@ -206,10 +198,7 @@ static u32 seccomp_run_filters(const struct seccomp_data *sd)
 	 * value always takes priority (ignoring the DATA).
 	 */
 	for (; f; f = f->prev) {
-		begin = rdtscp(NULL);
 		u32 cur_ret = BPF_PROG_RUN(f->prog, (void *)sd);
-		end = rdtscp(NULL);
-		pr_info("Prog %p took %lu cycles\n", f->prog, end - begin);
 
 		if ((cur_ret & SECCOMP_RET_ACTION) < (ret & SECCOMP_RET_ACTION))
 			ret = cur_ret;
