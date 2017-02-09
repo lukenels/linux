@@ -246,25 +246,15 @@ ouro_epilogue:
 	
 	retq
 
-FUNC(ouro_jit_stub)
+FUNC(do_ouro)
 
 	# Save registers
-	pushq %rax
 	pushq %rbx
-	pushq %rcx
-	pushq %rdx
-	pushq %rdi
-	pushq %rsi
 	pushq %rbp
-	pushq %r8
-	pushq %r9
-	pushq %r10
-	pushq %r11
 	pushq %r12
 	pushq %r13
 	pushq %r14
 	pushq %r15
-
 
 	 # From C:
 	 #   %rbx : pointer to output image
@@ -274,9 +264,9 @@ FUNC(ouro_jit_stub)
 	 #   %rax : Error code from compiler
 	 #
 	 # Prepare calling for Ouro
-	movq %rbx, %r11
-	movq %rcx, %rbp
-	movq %rdx, %r12
+	movq %rdx, %r11
+	movq %rdi, %rbp
+	movq %rsi, %r12
 
 	xor %rax, %rax
 	xor %rbx, %rbx
@@ -299,17 +289,8 @@ FUNC(ouro_jit_stub)
 	popq %r14
 	popq %r13
 	popq %r12
-	popq %r11
-	popq %r10
-	popq %r9
-	popq %r8
 	popq %rbp
-	popq %rsi
-	popq %rdi
-	popq %rdx
-	popq %rcx
 	popq %rbx
-	addq $0x8, %rsp # Don't pop rax, it's the error
 	
 	retq
 

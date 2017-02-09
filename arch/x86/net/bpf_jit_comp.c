@@ -1086,8 +1086,10 @@ common_load:
 	return proglen;
 }
 
-extern u8 ouro_jit_stub[], ouro_prologue_start[], ouro_prologue_end[],
+extern u8 ouro_prologue_start[], ouro_prologue_end[],
 	ouro_epilogue[];
+
+extern int do_ouro(void *src, size_t len, void *dst);
 
 static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 {
@@ -1110,11 +1112,7 @@ static int ouro_jit(struct bpf_prog *prog, u8 *image, struct jit_context *ctx)
 	image += prologue_size;
 
 	/* Run the compiler */
-	asm volatile (
-		"call *%%rax" :
-		"=a" (err) :
-		"a" (ouro_jit_stub), "b" (image), "c" (prog->insnsi), "d" (prog->len) :
-		"memory", "cc");
+	err = do_ouro(prog->insnsi, prog->len, image);
 
 	pr_info("Ouro error code = %d\n", err);
 	if (err != 0)
