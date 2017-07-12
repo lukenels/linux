@@ -102,7 +102,7 @@ ENTRY(secondary_startup_64)
 1:
 
 	/* Enable PAE mode, PGE and LA57 */
-	movl	$(X86_CR4_PAE | X86_CR4_PGE), %ecx
+	movl	$(X86_CR4_PAE | X86_CR4_PGE | X86_CR4_VMXE), %ecx
 #ifdef CONFIG_X86_5LEVEL
 	orl	$X86_CR4_LA57, %ecx
 #endif
