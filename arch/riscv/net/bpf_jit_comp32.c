@@ -1141,11 +1141,6 @@ static int emit_insn(const struct bpf_insn *insn,
 
 	switch (code) {
 	case BPF_ALU64 | BPF_MOV | BPF_X:
-		if (imm == 1) {
-			/* Special mov32 for zext */
-			emit_rv32_zext64(dst, ctx);
-			break;
-		}
 
 	case BPF_ALU64 | BPF_ADD | BPF_X:
 	case BPF_ALU64 | BPF_ADD | BPF_K:
