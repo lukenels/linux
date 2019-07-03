@@ -1078,17 +1078,11 @@ static int emit_rv32_store_r64(const s8 dst[], const s8 src[],
 
 static void emit_rv32_rev16(const s8 rd, struct rv_jit_context *ctx)
 {
-	emit(rv_addi(RV_REG_T1, RV_REG_ZERO, 0), ctx);
-
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
-	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
-	emit(rv_slli(RV_REG_T1, RV_REG_T1, 8), ctx);
+	emit(rv_slli(rd, rd, 16), ctx);
+	emit(rv_slli(RV_REG_T1, rd, 8), ctx);
 	emit(rv_srli(rd, rd, 8), ctx);
-
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
-	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
-
-	emit(rv_addi(rd, RV_REG_T1, 0), ctx);
+	emit(rv_add(RV_REG_T1, rd, RV_REG_T1), ctx);
+	emit(rv_srli(rd, RV_REG_T1, 16), ctx);
 }
 
 static void emit_rv32_rev32(const s8 rd, struct rv_jit_context *ctx)
