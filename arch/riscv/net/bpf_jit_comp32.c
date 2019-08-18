@@ -1191,6 +1191,7 @@ static int emit_insn(const struct bpf_insn *insn,
 			emit_rv32_zext64(dst, ctx);
 			break;
 		}
+		/* fallthrough */
 
 	case BPF_ALU | BPF_ADD | BPF_X:
 	case BPF_ALU | BPF_SUB | BPF_X:
@@ -1242,7 +1243,7 @@ static int emit_insn(const struct bpf_insn *insn,
 		case 16:
 			emit(rv_slli(lo(rd), lo(rd), 16), ctx);
 			emit(rv_srli(lo(rd), lo(rd), 16), ctx);
-			/* Fallthrough to clear high bits. */
+			/* fallthrough */
 		case 32:
 			if (!ctx->prog->aux->verifier_zext)
 				emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
