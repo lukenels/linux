@@ -316,9 +316,19 @@ static u32 rv_bltu(u8 rs1, u8 rs2, u16 imm12_1)
 	return rv_sb_insn(imm12_1, rs2, rs1, 6, 0x63);
 }
 
+static u32 rv_bgtu(u8 rs1, u8 rs2, u16 imm12_1)
+{
+	return rv_sb_insn(imm12_1, rs1, rs2, 6, 0x63);
+}
+
 static u32 rv_bgeu(u8 rs1, u8 rs2, u16 imm12_1)
 {
 	return rv_sb_insn(imm12_1, rs2, rs1, 7, 0x63);
+}
+
+static u32 rv_bleu(u8 rs1, u8 rs2, u16 imm12_1)
+{
+	return rv_sb_insn(imm12_1, rs1, rs2, 7, 0x63);
 }
 
 static u32 rv_bne(u8 rs1, u8 rs2, u16 imm12_1)
@@ -331,9 +341,19 @@ static u32 rv_blt(u8 rs1, u8 rs2, u16 imm12_1)
 	return rv_sb_insn(imm12_1, rs2, rs1, 4, 0x63);
 }
 
+static u32 rv_bgt(u8 rs1, u8 rs2, u16 imm12_1)
+{
+	return rv_sb_insn(imm12_1, rs1, rs2, 4, 0x63);
+}
+
 static u32 rv_bge(u8 rs1, u8 rs2, u16 imm12_1)
 {
 	return rv_sb_insn(imm12_1, rs2, rs1, 5, 0x63);
+}
+
+static u32 rv_ble(u8 rs1, u8 rs2, u16 imm12_1)
+{
+	return rv_sb_insn(imm12_1, rs1, rs2, 5, 0x63);
 }
 
 static u32 rv_sb(u8 rs1, u16 imm11_0, u8 rs2)
@@ -369,6 +389,11 @@ static u32 rv_lw(u8 rd, u16 imm11_0, u8 rs1)
 static u32 rv_amoadd_w(u8 rd, u8 rs2, u8 rs1, u8 aq, u8 rl)
 {
 	return rv_amo_insn(0, aq, rl, rs2, rs1, 2, rd, 0x2f);
+}
+
+static u32 rv_auipc(u8 rd, u32 imm31_12)
+{
+	return rv_u_insn(imm31_12, rd, 0x17);
 }
 
 static bool is_12b_int(s32 val)
@@ -428,10 +453,13 @@ static void emit_imm64(const s8 *rd, s32 imm_hi, s32 imm_lo,
 	emit_imm(hi(rd), imm_hi, ctx);
 }
 
-static int rv_offset(int bpf_to, int bpf_from, struct rv_jit_context *ctx)
+static int rv_offset(int insn, int off, struct rv_jit_context *ctx)
 {
-	int from = ctx->offset[bpf_from] - 1, to = ctx->offset[bpf_to];
+	int from, to;
 
+	off++; /* BPF branch is from PC+1, RV is from PC */
+	from = (insn > 0) ? ctx->offset[insn - 1] : 0;
+	to = (insn + off > 0) ? ctx->offset[insn + off - 1] : 0;
 	return (to - from) << 2;
 }
 
@@ -514,6 +542,22 @@ static void rv32_bpf_put_reg32(const s8 *reg, const s8 *src,
 	}
 }
 
+static void emit_jump_and_link(u8 rd, s32 rvoff, bool force_jalr,
+			       struct rv_jit_context *ctx)
+{
+	s32 upper, lower;
+
+	if (rvoff && is_21b_int(rvoff) && !force_jalr) {
+		emit(rv_jal(rd, rvoff >> 1), ctx);
+		return;
+	}
+
+	upper = (rvoff + (1 << 11)) >> 12;
+	lower = rvoff & 0xfff;
+	emit(rv_auipc(RV_REG_T1, upper), ctx);
+	emit(rv_jalr(rd, RV_REG_T1, lower), ctx);
+}
+
 static void emit_rv32_alu_i64(const s8 dst[], s32 imm,
 			      struct rv_jit_context *ctx,
 			      const u8 op)
@@ -532,8 +576,9 @@ static void emit_rv32_alu_i64(const s8 dst[], s32 imm,
 			emit_imm(RV_REG_T0, imm, ctx);
 			emit(rv_and(lo(rd), lo(rd), RV_REG_T0), ctx);
 		}
-		if (imm >= 0)
+		if (imm >= 0) {
 			emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
+		}
 		break;
 	case BPF_OR:
 		if (is_12b_int(imm)) {
@@ -542,8 +587,9 @@ static void emit_rv32_alu_i64(const s8 dst[], s32 imm,
 			emit_imm(RV_REG_T0, imm, ctx);
 			emit(rv_or(lo(rd), lo(rd), RV_REG_T0), ctx);
 		}
-		if (imm < 0)
+		if (imm < 0) {
 			emit(rv_ori(hi(rd), RV_REG_ZERO, -1), ctx);
+		}
 		break;
 	case BPF_XOR:
 		if (is_12b_int(imm)) {
@@ -552,8 +598,9 @@ static void emit_rv32_alu_i64(const s8 dst[], s32 imm,
 			emit_imm(RV_REG_T0, imm, ctx);
 			emit(rv_xor(lo(rd), lo(rd), RV_REG_T0), ctx);
 		}
-		if (imm < 0)
+		if (imm < 0) {
 			emit(rv_xori(hi(rd), hi(rd), -1), ctx);
+		}
 		break;
 	case BPF_LSH:
 		if (imm >= 32) {
@@ -608,7 +655,7 @@ static void emit_rv32_alu_i32(const s8 dst[], s32 imm,
 
 	switch (op) {
 	case BPF_MOV:
-		emit_imm32(rd, imm, ctx);
+		emit_imm(lo(rd), imm, ctx);
 		break;
 	case BPF_ADD:
 		if (is_12b_int(imm)) {
@@ -690,8 +737,8 @@ static void emit_rv32_alu_r64(const s8 dst[], const s8 src[],
 
 	switch (op) {
 	case BPF_MOV:
-		emit(rv_addi(hi(rd), hi(rs), 0), ctx);
 		emit(rv_addi(lo(rd), lo(rs), 0), ctx);
+		emit(rv_addi(hi(rd), hi(rs), 0), ctx);
 		break;
 	case BPF_ADD:
 		emit(rv_addi(RV_REG_T0, lo(rd), 0), ctx);
@@ -708,16 +755,16 @@ static void emit_rv32_alu_r64(const s8 dst[], const s8 src[],
 		emit(rv_sub(hi(rd), hi(rd), RV_REG_T0), ctx);
 		break;
 	case BPF_AND:
-		emit(rv_and(hi(rd), hi(rd), hi(rs)), ctx);
 		emit(rv_and(lo(rd), lo(rd), lo(rs)), ctx);
+		emit(rv_and(hi(rd), hi(rd), hi(rs)), ctx);
 		break;
 	case BPF_OR:
-		emit(rv_or(hi(rd), hi(rd), hi(rs)), ctx);
 		emit(rv_or(lo(rd), lo(rd), lo(rs)), ctx);
+		emit(rv_or(hi(rd), hi(rd), hi(rs)), ctx);
 		break;
 	case BPF_XOR:
-		emit(rv_xor(hi(rd), hi(rd), hi(rs)), ctx);
 		emit(rv_xor(lo(rd), lo(rd), lo(rs)), ctx);
+		emit(rv_xor(hi(rd), hi(rd), hi(rs)), ctx);
 		break;
 	case BPF_MUL:
 		emit(rv_mul(RV_REG_T0, hi(rs), lo(rd)), ctx);
@@ -729,12 +776,10 @@ static void emit_rv32_alu_r64(const s8 dst[], const s8 src[],
 		break;
 	case BPF_LSH:
 		emit(rv_addi(RV_REG_T0, lo(rs), -32), ctx);
-		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 16 >> 1), ctx);
-
+		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 8), ctx);
 		emit(rv_sll(hi(rd), lo(rd), RV_REG_T0), ctx);
 		emit(rv_addi(lo(rd), RV_REG_ZERO, 0), ctx);
-		emit(rv_jal(RV_REG_ZERO, 32 >> 1), ctx);
-
+		emit(rv_jal(RV_REG_ZERO, 16), ctx);
 		emit(rv_addi(RV_REG_T1, RV_REG_ZERO, 31), ctx);
 		emit(rv_srli(RV_REG_T0, lo(rd), 1), ctx);
 		emit(rv_sub(RV_REG_T1, RV_REG_T1, lo(rs)), ctx);
@@ -745,12 +790,10 @@ static void emit_rv32_alu_r64(const s8 dst[], const s8 src[],
 		break;
 	case BPF_RSH:
 		emit(rv_addi(RV_REG_T0, lo(rs), -32), ctx);
-		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 16 >> 1), ctx);
-
+		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 8), ctx);
 		emit(rv_srl(lo(rd), hi(rd), RV_REG_T0), ctx);
 		emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
-		emit(rv_jal(RV_REG_ZERO, 32 >> 1), ctx);
-
+		emit(rv_jal(RV_REG_ZERO, 16), ctx);
 		emit(rv_addi(RV_REG_T1, RV_REG_ZERO, 31), ctx);
 		emit(rv_slli(RV_REG_T0, hi(rd), 1), ctx);
 		emit(rv_sub(RV_REG_T1, RV_REG_T1, lo(rs)), ctx);
@@ -761,12 +804,10 @@ static void emit_rv32_alu_r64(const s8 dst[], const s8 src[],
 		break;
 	case BPF_ARSH:
 		emit(rv_addi(RV_REG_T0, lo(rs), -32), ctx);
-		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 16 >> 1), ctx);
-
+		emit(rv_blt(RV_REG_T0, RV_REG_ZERO, 8), ctx);
 		emit(rv_sra(lo(rd), hi(rd), RV_REG_T0), ctx);
-		emit(rv_srai(hi(rd), hi(rd), 0x1f), ctx);
-		emit(rv_jal(RV_REG_ZERO, 32 >> 1), ctx);
-
+		emit(rv_srai(hi(rd), hi(rd), 31), ctx);
+		emit(rv_jal(RV_REG_ZERO, 16), ctx);
 		emit(rv_addi(RV_REG_T1, RV_REG_ZERO, 31), ctx);
 		emit(rv_slli(RV_REG_T0, hi(rd), 1), ctx);
 		emit(rv_sub(RV_REG_T1, RV_REG_T1, lo(rs)), ctx);
@@ -845,85 +886,88 @@ static int emit_rv32_jump_r64(const s8 src1[], const s8 src2[],
 			      struct rv_jit_context *ctx,
 			      const u8 op)
 {
-	int rvoff;
+	int rvoff, s, e;
 	const s8 *tmp1 = bpf2rv32[TMP_REG_1];
 	const s8 *tmp2 = bpf2rv32[TMP_REG_2];
+
+	s = ctx->ninsns;
+	rvoff = rv_offset(insn, off, ctx);
+
 	const s8 *rs1 = rv32_bpf_get_reg64(src1, tmp1, ctx);
 	const s8 *rs2 = rv32_bpf_get_reg64(src2, tmp2, ctx);
 
-	rvoff = rv_offset(insn + off, insn, ctx) + 8;
-	/* Test if far branch. */
-	if (!is_13b_int(rvoff + 8))
-		rvoff = 8;
+#define NO_JUMP(idx) (4 + (2*idx))
+#define JUMP(idx) (2 + (2*idx))
 
 	switch (op) {
 	case BPF_JEQ:
-		emit(rv_bne(hi(rs1), hi(rs2), 8 >> 1), ctx);
-		emit(rv_beq(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JNE:
-		emit(rv_bne(hi(rs1), hi(rs2), (rvoff + 4) >> 1), ctx);
-		emit(rv_bne(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JLE:
-		emit(rv_bltu(hi(rs1), hi(rs2), (rvoff + 8) >> 1), ctx);
-		emit(rv_bltu(hi(rs2), hi(rs1), 8 >> 1), ctx);
-		emit(rv_bgeu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
-		break;
-	case BPF_JLT:
-		emit(rv_bltu(hi(rs1), hi(rs2), (rvoff + 8) >> 1), ctx);
-		emit(rv_bltu(hi(rs2), hi(rs1), 8 >> 1), ctx);
-		emit(rv_bltu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JGE:
-		emit(rv_bltu(hi(rs2), hi(rs1), (rvoff + 8) >> 1), ctx);
-		emit(rv_bltu(hi(rs1), hi(rs2), 8 >> 1), ctx);
-		emit(rv_bgeu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+		emit(rv_bne(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bne(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
 	case BPF_JGT:
-		emit(rv_bltu(hi(rs2), hi(rs1), (rvoff + 8) >> 1), ctx);
-		emit(rv_bltu(hi(rs1), hi(rs2), 8 >> 1), ctx);
-		emit(rv_bltu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+		emit(rv_bgtu(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
-	case BPF_JSLE:
-		emit(rv_blt(hi(rs1), hi(rs2), (rvoff + 8) >> 1), ctx);
-		emit(rv_bne(hi(rs2), hi(rs1), 8 >> 1), ctx);
-		emit(rv_bgeu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+	case BPF_JLT:
+		emit(rv_bltu(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
-	case BPF_JSLT:
-		emit(rv_blt(hi(rs1), hi(rs2), (rvoff + 8) >> 1), ctx);
-		emit(rv_bne(hi(rs2), hi(rs1), 8 >> 1), ctx);
-		emit(rv_bltu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+	case BPF_JGE:
+		emit(rv_bgtu(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
-	case BPF_JSGE:
-		emit(rv_blt(hi(rs2), hi(rs1), (rvoff + 8) >> 1), ctx);
-		emit(rv_bne(hi(rs1), hi(rs2), 8 >> 1), ctx);
-		emit(rv_bgeu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+	case BPF_JLE:
+		emit(rv_bltu(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		break;
+	case BPF_JNE:
+		emit(rv_bne(hi(rs1), hi(rs2), JUMP(1)), ctx);
+		emit(rv_beq(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
 	case BPF_JSGT:
-		emit(rv_blt(hi(rs2), hi(rs1), (rvoff + 8) >> 1), ctx);
-		emit(rv_bne(hi(rs1), hi(rs2), 8 >> 1), ctx);
-		emit(rv_bltu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+		emit(rv_bgt(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		break;
+	case BPF_JSLT:
+		emit(rv_blt(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		break;
+	case BPF_JSGE:
+		emit(rv_bgt(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		break;
+	case BPF_JSLE:
+		emit(rv_blt(hi(rs1), hi(rs2), JUMP(2)), ctx);
+		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
+		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
 		break;
 	case BPF_JSET:
 		emit(rv_and(RV_REG_T0, hi(rs1), hi(rs2)), ctx);
-		emit(rv_bne(RV_REG_T0, RV_REG_ZERO, (rvoff + 8) >> 1), ctx);
+		emit(rv_bne(RV_REG_T0, RV_REG_ZERO, JUMP(2)), ctx);
 		emit(rv_and(RV_REG_T0, lo(rs1), lo(rs2)), ctx);
-		emit(rv_bne(RV_REG_T0, RV_REG_ZERO, rvoff >> 1), ctx);
+		emit(rv_beq(RV_REG_T0, RV_REG_ZERO, NO_JUMP(0)), ctx);
 		break;
 	}
 
-	/* Emit code for far branching. This is skipped for short branches,
-	 * but must remain in JITed code to keep offsets same across runs.
-	 */
-	rvoff = rv_offset(insn + off, insn, ctx);
+#undef NO_JUMP
+#undef JUMP
+
+	e = ctx->ninsns;
+	rvoff -= (e - s) << 2; // Adjust for extra insns
+
 	if (!is_21b_int(rvoff)) {
 		pr_err("bpf-jit: insn=%d offset=%d not supported yet!\n",
 			insn, rvoff);
 		return -1;
 	}
 
-	emit(rv_jal(RV_REG_ZERO, 8 >> 1), ctx);
 	emit(rv_jal(RV_REG_ZERO, rvoff >> 1), ctx);
 
 	return 0;
@@ -934,55 +978,56 @@ static int emit_rv32_jump_r32(const s8 src1[], const s8 src2[],
 			      struct rv_jit_context *ctx,
 			      const u8 op)
 {
-	int rvoff;
+	int rvoff, s, e;
 	const s8 *tmp1 = bpf2rv32[TMP_REG_1];
 	const s8 *tmp2 = bpf2rv32[TMP_REG_2];
+
+	s = ctx->ninsns;
+	rvoff = rv_offset(insn, off, ctx);
+
 	const s8 *rs1 = rv32_bpf_get_reg32(src1, tmp1, ctx);
 	const s8 *rs2 = rv32_bpf_get_reg32(src2, tmp2, ctx);
 
-	rvoff = rv_offset(insn + off, insn, ctx) + 8;
-	/* Test if far branch. */
-	if (!is_13b_int(rvoff))
-		rvoff = 8;
-
 	switch (op) {
 	case BPF_JEQ:
-		emit(rv_beq(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JNE:
-		emit(rv_bne(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JLE:
-		emit(rv_bgeu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
-		break;
-	case BPF_JLT:
-		emit(rv_bltu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
-		break;
-	case BPF_JGE:
-		emit(rv_bgeu(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+		emit(rv_bne(lo(rs1), lo(rs2), 6), ctx);
 		break;
 	case BPF_JGT:
-		emit(rv_bltu(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+		emit(rv_bleu(lo(rs1), lo(rs2), 6), ctx);
 		break;
-	case BPF_JSLE:
-		emit(rv_bge(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+	case BPF_JLT:
+		emit(rv_bgeu(lo(rs1), lo(rs2), 6), ctx);
 		break;
-	case BPF_JSLT:
-		emit(rv_blt(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+	case BPF_JGE:
+		emit(rv_bltu(lo(rs1), lo(rs2), 6), ctx);
 		break;
-	case BPF_JSGE:
-		emit(rv_bge(lo(rs1), lo(rs2), rvoff >> 1), ctx);
+	case BPF_JLE:
+		emit(rv_bgtu(lo(rs1), lo(rs2), 6), ctx);
+		break;
+	case BPF_JNE:
+		emit(rv_beq(lo(rs1), lo(rs2), 6), ctx);
 		break;
 	case BPF_JSGT:
-		emit(rv_blt(lo(rs2), lo(rs1), rvoff >> 1), ctx);
+		emit(rv_ble(lo(rs1), lo(rs2), 6), ctx);
+		break;
+	case BPF_JSLT:
+		emit(rv_bge(lo(rs1), lo(rs2), 6), ctx);
+		break;
+	case BPF_JSGE:
+		emit(rv_blt(lo(rs1), lo(rs2), 6), ctx);
+		break;
+	case BPF_JSLE:
+		emit(rv_bgt(lo(rs1), lo(rs2), 6), ctx);
 		break;
 	case BPF_JSET:
 		emit(rv_and(RV_REG_T0, lo(rs1), lo(rs2)), ctx);
-		emit(rv_bne(RV_REG_T0, RV_REG_ZERO, rvoff >> 1), ctx);
+		emit(rv_beq(RV_REG_T0, RV_REG_ZERO, 6), ctx);
 		break;
 	}
 
-	rvoff = rv_offset(insn + off, insn, ctx);
+	e = ctx->ninsns;
+	rvoff -= (e - s) << 2; // Adjust for extra insns
+
 	if (!is_21b_int(rvoff)) {
 		pr_err("bpf-jit: insn=%d offset=%d not supported yet!\n",
 			insn, rvoff);
@@ -1088,24 +1133,20 @@ static void emit_rv32_rev16(const s8 rd, struct rv_jit_context *ctx)
 static void emit_rv32_rev32(const s8 rd, struct rv_jit_context *ctx)
 {
 	emit(rv_addi(RV_REG_T1, RV_REG_ZERO, 0), ctx);
-
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
+	emit(rv_andi(RV_REG_T0, rd, 255), ctx);
 	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
 	emit(rv_slli(RV_REG_T1, RV_REG_T1, 8), ctx);
 	emit(rv_srli(rd, rd, 8), ctx);
-
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
+	emit(rv_andi(RV_REG_T0, rd, 255), ctx);
 	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
 	emit(rv_slli(RV_REG_T1, RV_REG_T1, 8), ctx);
 	emit(rv_srli(rd, rd, 8), ctx);
-
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
+	emit(rv_andi(RV_REG_T0, rd, 255), ctx);
 	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
 	emit(rv_slli(RV_REG_T1, RV_REG_T1, 8), ctx);
 	emit(rv_srli(rd, rd, 8), ctx);
-	emit(rv_andi(RV_REG_T0, rd, 0xff), ctx);
+	emit(rv_andi(RV_REG_T0, rd, 255), ctx);
 	emit(rv_add(RV_REG_T1, RV_REG_T1, RV_REG_T0), ctx);
-
 	emit(rv_addi(rd, RV_REG_T1, 0), ctx);
 }
 
@@ -1289,7 +1330,7 @@ static int emit_insn(const struct bpf_insn *insn,
 	}
 
 	case BPF_JMP | BPF_JA:
-		rvoff = rv_offset(i + off, i, ctx);
+		rvoff = rv_offset(i, off, ctx);
 		if (!is_21b_int(rvoff)) {
 			pr_err("bpf-jit: insn=%d offset=%d not supported yet!\n",
 			       i, rvoff);
