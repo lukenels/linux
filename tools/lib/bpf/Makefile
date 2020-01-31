@@ -62,7 +62,7 @@ FEATURE_USER = .libbpf
 FEATURE_TESTS = libelf zlib bpf
 FEATURE_DISPLAY = libelf zlib bpf
 
-INCLUDES = -I. -I$(srctree)/tools/include -I$(srctree)/tools/include/uapi -I/home/lukenels/repo/buildroot/output/build/elfutils-0.177/libelf -I /home/lukenels/repo/buildroot/output/build/libzlib-1.2.11
+INCLUDES = -I. -Iinclude -I$(srctree)/tools/include -I$(srctree)/tools/include/uapi
 FEATURE_CHECK_CFLAGS-bpf = $(INCLUDES)
 
 check_feat := 1

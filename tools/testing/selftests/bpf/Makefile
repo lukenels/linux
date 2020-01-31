@@ -19,8 +19,11 @@ ifneq ($(wildcard $(GENHDR)),)
   GENFLAGS := -DHAVE_GENHDR
 endif
 
+LLVM_CONFIG?=llvm-config
+
 CLANG		?= clang
-LLVM_OBJCOPY	?= llvm-objcopy
+LLC		?= $(shell $(LLVM_CONFIG) --bindir)/llc
+LLVM_OBJCOPY	?= l$(shell $(LLVM_CONFIG) --bindir)/llvm-objcopy
 BPF_GCC		?= $(shell command -v bpf-gcc;)
 SAN_CFLAGS	?=
 CFLAGS += -g -rdynamic -Wall -O2 $(GENFLAGS) $(SAN_CFLAGS)		\
@@ -29,7 +32,7 @@ CFLAGS += -g -rdynamic -Wall -O2 $(GENFLAGS) $(SAN_CFLAGS)		\
 	  -I/home/lukenels/repo/buildroot/output/build/host-libcap-2.45/libcap/include \
 	  -Dbpf_prog_load=bpf_prog_test_load				\
 	  -Dbpf_load_program=bpf_test_load_program
-LDLIBS += -L/home/lukenels/repo/buildroot/output/target/usr/lib -lcap -lelf -lz -lrt -lpthread
+LDLIBS += -Llib -lcap -lelf -lz -lrt -lpthread
 
 # Order correspond to 'make run_tests' order
 TEST_GEN_PROGS = test_verifier test_tag test_maps test_lru_map test_lpm_map test_progs \
@@ -262,7 +265,7 @@ MENDIAN=$(if $(IS_LITTLE_ENDIAN),-mlittle-endian,-mbig-endian)
 CLANG_SYS_INCLUDES = $(call get_sys_includes,$(CLANG))
 BPF_CFLAGS = -g -D__TARGET_ARCH_$(SRCARCH) $(MENDIAN) 			\
 	     -I$(INCLUDE_DIR) -I$(CURDIR) -I$(APIDIR)			\
-	     -I$(abspath $(OUTPUT)/../usr/include)
+	     -I$(abspath $(OUTPUT)/../usr/include) -I../../../lib
 
 CLANG_CFLAGS = $(CLANG_SYS_INCLUDES) \
 	       -Wno-compare-distinct-pointer-types
