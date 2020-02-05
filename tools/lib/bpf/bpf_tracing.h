@@ -24,6 +24,9 @@
 #elif defined(__TARGET_ARCH_sparc)
 	#define bpf_target_sparc
 	#define bpf_target_defined
+#elif defined(__TARGET_ARCH_riscv)
+	#define bpf_target_riscv
+	#define bpf_target_defined
 #else
 	#undef bpf_target_defined
 #endif
@@ -44,6 +47,8 @@
 	#define bpf_target_powerpc
 #elif defined(__sparc__)
 	#define bpf_target_sparc
+#elif defined(__riscv__)
+	#define bpf_target_riscv
 #endif
 #endif
 
@@ -249,6 +254,16 @@ struct pt_regs;
 #define PT_REGS_RC_CORE(x) BPF_CORE_READ((x), gpr[3])
 #define PT_REGS_SP_CORE(x) BPF_CORE_READ((x), sp)
 #define PT_REGS_IP_CORE(x) BPF_CORE_READ((x), nip)
+
+#elif defined(bpf_target_riscv)
+
+#define PT_REGS_PARM1(x) ((x)->a0)
+#define PT_REGS_PARM2(x) ((x)->a1)
+#define PT_REGS_PARM3(x) ((x)->a2)
+#define PT_REGS_PARM4(x) ((x)->a3)
+#define PT_REGS_PARM5(x) ((x)->a4)
+#define PT_REGS_SP(x) ((x)->sp)
+#define PT_REGS_IP(x) ((x)->epc)
 
 #elif defined(bpf_target_sparc)
 
