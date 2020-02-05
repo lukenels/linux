@@ -21,7 +21,7 @@ endif
 
 LLVM_CONFIG?=llvm-config
 
-CLANG		?= clang
+CLANG		?= $(shell $(LLVM_CONFIG) --bindir)/clang
 LLC		?= $(shell $(LLVM_CONFIG) --bindir)/llc
 LLVM_OBJCOPY	?= l$(shell $(LLVM_CONFIG) --bindir)/llvm-objcopy
 BPF_GCC		?= $(shell command -v bpf-gcc;)
