@@ -562,7 +562,8 @@ static void emit_alu_r32(const s8 *dst, const s8 *src,
 }
 
 static int emit_branch_r64(const s8 *src1, const s8 *src2, s32 rvoff,
-			   struct rv_jit_context *ctx, const u8 op)
+			   s32 rvoff_next, struct rv_jit_context *ctx,
+			   const u8 op)
 {
 	int e, s = ctx->ninsns;
 	const s8 *tmp1 = bpf2rv32[TMP_REG_1];
@@ -579,63 +580,63 @@ static int emit_branch_r64(const s8 *src1, const s8 *src2, s32 rvoff,
 	 *
 	 * The fallthrough case results in the BPF branch being taken.
 	 */
-#define NO_JUMP(idx) (6 + (2 * (idx)))
+#define NO_JUMP() ((rvoff_next - ((ctx->ninsns - s) << 2)) >> 1)
 #define JUMP(idx) (2 + (2 * (idx)))
 
 	switch (op) {
 	case BPF_JEQ:
-		emit(rv_bne(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bne(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bne(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bne(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JGT:
 		emit(rv_bgtu(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JLT:
 		emit(rv_bltu(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JGE:
 		emit(rv_bgtu(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bltu(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JLE:
 		emit(rv_bltu(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bgtu(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JNE:
 		emit(rv_bne(hi(rs1), hi(rs2), JUMP(1)), ctx);
-		emit(rv_beq(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_beq(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JSGT:
 		emit(rv_bgt(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bleu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JSLT:
 		emit(rv_blt(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bgeu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JSGE:
 		emit(rv_bgt(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_blt(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bltu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JSLE:
 		emit(rv_blt(hi(rs1), hi(rs2), JUMP(2)), ctx);
-		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP(1)), ctx);
-		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP(0)), ctx);
+		emit(rv_bgt(hi(rs1), hi(rs2), NO_JUMP()), ctx);
+		emit(rv_bgtu(lo(rs1), lo(rs2), NO_JUMP()), ctx);
 		break;
 	case BPF_JSET:
 		emit(rv_and(RV_REG_T0, hi(rs1), hi(rs2)), ctx);
 		emit(rv_bne(RV_REG_T0, RV_REG_ZERO, JUMP(2)), ctx);
 		emit(rv_and(RV_REG_T0, lo(rs1), lo(rs2)), ctx);
-		emit(rv_beq(RV_REG_T0, RV_REG_ZERO, NO_JUMP(0)), ctx);
+		emit(rv_beq(RV_REG_T0, RV_REG_ZERO, NO_JUMP()), ctx);
 		break;
 	}
 
@@ -645,7 +646,7 @@ static int emit_branch_r64(const s8 *src1, const s8 *src2, s32 rvoff,
 	e = ctx->ninsns;
 	/* Adjust for extra insns. */
 	rvoff -= (e - s) << 2;
-	emit_jump_and_link(RV_REG_ZERO, rvoff, true, ctx);
+	emit_jump_and_link(RV_REG_ZERO, rvoff, false, ctx);
 	return 0;
 }
 
@@ -958,7 +959,7 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 {
 	bool is64 = BPF_CLASS(insn->code) == BPF_ALU64 ||
 		BPF_CLASS(insn->code) == BPF_JMP;
-	int s, e, rvoff, i = insn - ctx->prog->insnsi;
+	int s, e, rvoff, rvoff_next, i = insn - ctx->prog->insnsi;
 	u8 code = insn->code;
 	s16 off = insn->off;
 	s32 imm = insn->imm;
@@ -1209,16 +1210,19 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 	case BPF_JMP32 | BPF_JSET | BPF_X:
 	case BPF_JMP32 | BPF_JSET | BPF_K:
 		rvoff = rv_offset(i, off, ctx);
+		rvoff_next = rv_offset(i, 0, ctx);
 		if (BPF_SRC(code) == BPF_K) {
 			s = ctx->ninsns;
 			emit_imm32(tmp2, imm, ctx);
 			src = tmp2;
 			e = ctx->ninsns;
 			rvoff -= (e - s) << 2;
+			rvoff_next -= (e - s) << 2;
 		}
 
 		if (is64)
-			emit_branch_r64(dst, src, rvoff, ctx, BPF_OP(code));
+			emit_branch_r64(dst, src, rvoff, rvoff_next, ctx,
+					BPF_OP(code));
 		else
 			emit_branch_r32(dst, src, rvoff, ctx, BPF_OP(code));
 		break;
