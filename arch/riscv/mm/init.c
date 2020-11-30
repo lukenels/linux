@@ -156,8 +156,9 @@ disable:
 
 void __init setup_bootmem(void)
 {
-	phys_addr_t mem_start = 0;
-	phys_addr_t start, end = 0;
+	phys_addr_t mem_size = 0;
+	phys_addr_t total_mem = 0;
+	phys_addr_t mem_start, start, end = 0;
 	phys_addr_t vmlinux_end = __pa_symbol(&_end);
 	phys_addr_t vmlinux_start = __pa_symbol(&_start);
 	u64 i;
@@ -165,16 +166,16 @@ void __init setup_bootmem(void)
 	/* Find the memory region containing the kernel */
 	for_each_mem_range(i, &start, &end) {
 		phys_addr_t size = end - start;
-		if (!mem_start)
+		if (!total_mem)
 			mem_start = start;
 		if (start <= vmlinux_start && vmlinux_end <= end)
 			BUG_ON(size == 0);
+		total_mem = total_mem + size;
 	}
 
 	/*
-	 * The maximal physical memory size is -PAGE_OFFSET.
-	 * Make sure that any memory beyond mem_start + (-PAGE_OFFSET) is removed
-	 * as it is unusable by kernel.
+	 * Remove memblock from the end of usable area to the
+	 * end of region
 	 */
 	memblock_enforce_memory_limit(-PAGE_OFFSET);
 
