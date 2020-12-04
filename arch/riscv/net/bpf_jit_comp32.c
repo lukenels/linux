@@ -182,15 +182,26 @@ static bool is_stacked(s8 reg)
 	return reg < 0;
 }
 
-static const s8 *bpf_get_reg64(const s8 *reg, const s8 *tmp,
-			       struct rv_jit_context *ctx)
+static const s8 *__bpf_get_reg64(const s8 *reg, const s8 *tmp, bool force_tmp,
+				 struct rv_jit_context *ctx)
 {
 	if (is_stacked(hi(reg))) {
 		emit(rv_lw(hi(tmp), hi(reg), RV_REG_FP), ctx);
 		emit(rv_lw(lo(tmp), lo(reg), RV_REG_FP), ctx);
-		reg = tmp;
+		return tmp;
+	} else if (force_tmp) {
+		emit(rv_addi(hi(tmp), hi(reg), 0), ctx);
+		emit(rv_addi(lo(tmp), lo(reg), 0), ctx);
+		return tmp;
+	} else {
+		return reg;
 	}
-	return reg;
+}
+
+static const s8 *bpf_get_reg64(const s8 *reg, const s8 *tmp,
+			       struct rv_jit_context *ctx)
+{
+	return __bpf_get_reg64(reg, tmp, false, ctx);
 }
 
 static void bpf_put_reg64(const s8 *reg, const s8 *src,
@@ -199,6 +210,9 @@ static void bpf_put_reg64(const s8 *reg, const s8 *src,
 	if (is_stacked(hi(reg))) {
 		emit(rv_sw(RV_REG_FP, hi(reg), hi(src)), ctx);
 		emit(rv_sw(RV_REG_FP, lo(reg), lo(src)), ctx);
+	} else if (lo(reg) != lo(src)) {
+		emit(rv_addi(hi(reg), hi(src), 0), ctx);
+		emit(rv_addi(lo(reg), lo(src), 0), ctx);
 	}
 }
 
@@ -222,6 +236,127 @@ static void bpf_put_reg32(const s8 *reg, const s8 *src,
 	} else if (!ctx->prog->aux->verifier_zext) {
 		emit(rv_addi(hi(reg), RV_REG_ZERO, 0), ctx);
 	}
+}
+
+static void emit_save_caller_state(struct rv_jit_context *ctx)
+{
+	/* Make space on stack. */
+	emit(rv_addi(RV_REG_SP, RV_REG_SP, -(48)), ctx);
+
+	/* Save caller-save registers. */
+	emit(rv_sw(RV_REG_SP, 0, RV_REG_A0), ctx);
+	emit(rv_sw(RV_REG_SP, 4, RV_REG_A1), ctx);
+	emit(rv_sw(RV_REG_SP, 8, RV_REG_A2), ctx);
+	emit(rv_sw(RV_REG_SP, 12, RV_REG_A3), ctx);
+	emit(rv_sw(RV_REG_SP, 16, RV_REG_A4), ctx);
+	emit(rv_sw(RV_REG_SP, 20, RV_REG_A5), ctx);
+	emit(rv_sw(RV_REG_SP, 24, RV_REG_A6), ctx);
+	emit(rv_sw(RV_REG_SP, 28, RV_REG_A7), ctx);
+	emit(rv_addi(RV_REG_TCC_SAVED, RV_REG_TCC, 0), ctx);
+}
+
+static void emit_restore_caller_state(struct rv_jit_context *ctx)
+{
+	/* Restore caller-save registers. */
+	emit(rv_lw(RV_REG_A0, 0, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A1, 4, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A2, 8, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A3, 12, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A4, 16, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A5, 20, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A6, 24, RV_REG_SP), ctx);
+	emit(rv_lw(RV_REG_A7, 28, RV_REG_SP), ctx);
+	emit(rv_addi(RV_REG_TCC, RV_REG_TCC_SAVED, 0), ctx);
+
+	/* Restore stack. */
+	emit(rv_addi(RV_REG_SP, RV_REG_SP, 48), ctx);
+}
+
+static void emit_jump_and_link_absolute(const s8 rd, u32 fn_addr, struct rv_jit_context *ctx)
+{
+	u32 upper = (fn_addr + (1 << 11)) >> 12;
+	u32 lower = fn_addr & 0xfff;
+
+	emit(rv_lui(RV_REG_T0, upper), ctx);
+	emit(rv_jalr(RV_REG_RA, RV_REG_T0, lower), ctx);
+}
+
+static void emit_div64_u64_rem(const s8 *dst, const s8 *src, const u8 op,
+			       struct rv_jit_context *ctx)
+{
+	const u32 fn_addr = (u32)&div64_u64_rem;
+	const s8 *tmp1 = bpf2rv32[TMP_REG_1];
+	const s8 *tmp2 = bpf2rv32[TMP_REG_2];
+
+	/* Force loading to temporary to avoid aliasing. */
+	const s8 *rd = __bpf_get_reg64(dst, tmp1, true, ctx);
+	const s8 *rs = __bpf_get_reg64(src, tmp2, true, ctx);
+
+	/* Save registers used during function call. */
+	emit_save_caller_state(ctx);
+
+	/*
+	 * Move operands to correct registers.
+	 *   u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder);
+	 */
+	emit(rv_addi(RV_REG_A0, lo(rd), 0), ctx);
+	emit(rv_addi(RV_REG_A1, hi(rd), 0), ctx);
+	emit(rv_addi(RV_REG_A2, lo(rs), 0), ctx);
+	emit(rv_addi(RV_REG_A3, hi(rs), 0), ctx);
+	emit(rv_addi(RV_REG_A4, RV_REG_SP, 32), ctx);
+
+	/* Generate function call. */
+	emit_jump_and_link_absolute(RV_REG_RA, fn_addr, ctx);
+
+	/* Move return value. */
+	switch (op) {
+	case BPF_DIV:
+		/* Quotient is in a1:a0. */
+		emit(rv_addi(lo(rd), RV_REG_A0, 0), ctx);
+		emit(rv_addi(hi(rd), RV_REG_A1, 0), ctx);
+		break;
+	case BPF_MOD:
+		/* Remainder is on stack. */
+		emit(rv_lw(lo(rd), 32, RV_REG_SP), ctx);
+		emit(rv_lw(hi(rd), 36, RV_REG_SP), ctx);
+		break;
+	}
+
+	/* Restore registers used during function call. */
+	emit_restore_caller_state(ctx);
+
+	bpf_put_reg64(dst, rd, ctx);
+}
+
+static void emit_xadd_64(const s8 *dst, const s8 *src, s16 off, struct rv_jit_context *ctx)
+{
+	const u32 fn_addr = (u32)&atomic64_add;
+	const s8 *tmp1 = bpf2rv32[TMP_REG_1];
+	const s8 *tmp2 = bpf2rv32[TMP_REG_2];
+
+	/* Force loading to temporary to avoid aliasing. */
+	const s8 *rd = __bpf_get_reg64(dst, tmp1, true, ctx);
+	const s8 *rs = __bpf_get_reg64(src, tmp2, true, ctx);
+
+	/* Create pointer+offset. */
+	emit_imm(RV_REG_T0, off, ctx);
+	emit(rv_add(RV_REG_T0, RV_REG_T0, lo(rd)), ctx);
+
+	emit_save_caller_state(ctx);
+
+	/*
+	 * Move operands to correct registers.
+	 *   void atomic64_add(s64 a, atomic64_t *v);
+	 */
+	emit(rv_addi(RV_REG_A0, lo(rs), 0), ctx);
+	emit(rv_addi(RV_REG_A1, hi(rs), 0), ctx);
+	emit(rv_addi(RV_REG_A2, RV_REG_T0, 0), ctx);
+
+	/* Generate function call. */
+	emit_jump_and_link_absolute(RV_REG_RA, fn_addr, ctx);
+
+	/* Restore registers used during function call. */
+	emit_restore_caller_state(ctx);
 }
 
 static void emit_jump_and_link(u8 rd, s32 rvoff, bool force_jalr,
@@ -1002,7 +1137,12 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 	case BPF_ALU64 | BPF_DIV | BPF_K:
 	case BPF_ALU64 | BPF_MOD | BPF_X:
 	case BPF_ALU64 | BPF_MOD | BPF_K:
-		goto notsupported;
+		if (BPF_SRC(code) == BPF_K) {
+			emit_imm32(tmp2, imm, ctx);
+			src = tmp2;
+		}
+		emit_div64_u64_rem(dst, src, BPF_OP(code), ctx);
+		break;
 
 	case BPF_ALU64 | BPF_MOV | BPF_K:
 	case BPF_ALU64 | BPF_AND | BPF_K:
@@ -1283,9 +1423,9 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 			return -1;
 		break;
 
-	/* No hardware support for 8-byte atomics in RV32. */
 	case BPF_STX | BPF_ATOMIC | BPF_DW:
-		/* Fallthrough. */
+		emit_xadd_64(dst, src, off, ctx);
+		break;
 
 notsupported:
 		pr_info_once("bpf-jit: not supported: opcode %02x ***\n", code);
