@@ -150,6 +150,55 @@ struct tnum tnum_intersect(struct tnum a, struct tnum b)
 	return TNUM(v & ~mu, mu);
 }
 
+struct tnum tnum_union(struct tnum a, struct tnum b)
+{
+	u64 v, mu;
+
+	v = a.value | b.value;
+	mu = a.mask | b.mask | (a.value ^ b.value);
+	return TNUM(v & ~mu, mu);
+}
+
+struct tnum tnum_shl(struct tnum a, struct tnum b, u8 insn_bitness)
+{
+	u8 amt = 1;
+
+	b = tnum_and(b, tnum_const(insn_bitness - 1));
+
+	while (b.value || b.mask) {
+		if (b.mask & 1)
+			a = tnum_union(a, tnum_lshift(a, amt));
+
+		if (b.value & 1)
+			a = tnum_lshift(a, amt);
+
+		amt <<= 1;
+		b = tnum_rshift(b, 1);
+	}
+
+	return a;
+}
+
+struct tnum tnum_lshr(struct tnum a, struct tnum b, u8 insn_bitness)
+{
+	u8 amt = 1;
+
+	b = tnum_and(b, tnum_const(insn_bitness - 1));
+
+	while (b.value || b.mask) {
+		if (b.mask & 1)
+			a = tnum_union(a, tnum_rshift(a, amt));
+
+		if (b.value & 1)
+			a = tnum_rshift(a, amt);
+
+		amt <<= 1;
+		b = tnum_rshift(b, 1);
+	}
+
+	return a;
+}
+
 struct tnum tnum_cast(struct tnum a, u8 size)
 {
 	a.value &= (1ULL << (size * 8)) - 1;

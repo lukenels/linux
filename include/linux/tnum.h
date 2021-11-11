@@ -43,6 +43,10 @@ struct tnum tnum_or(struct tnum a, struct tnum b);
 struct tnum tnum_xor(struct tnum a, struct tnum b);
 /* Multiply two tnums, return @a * @b */
 struct tnum tnum_mul(struct tnum a, struct tnum b);
+/* Shift left, return @a << @b */
+struct tnum tnum_shl(struct tnum a, struct tnum b, u8 insn_bitness);
+/* Shift right (logical), return @a >> @b */
+struct tnum tnum_lshr(struct tnum a, struct tnum b, u8 insn_bitness);
 
 /* Return a tnum representing numbers satisfying both @a and @b */
 struct tnum tnum_intersect(struct tnum a, struct tnum b);

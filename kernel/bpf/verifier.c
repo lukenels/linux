@@ -8361,10 +8361,11 @@ static void scalar32_min_max_lsh(struct bpf_reg_state *dst_reg,
 	u32 umax_val = src_reg->u32_max_value;
 	u32 umin_val = src_reg->u32_min_value;
 	/* u32 alu operation will zext upper bits */
-	struct tnum subreg = tnum_subreg(dst_reg->var_off);
+	struct tnum dst_subreg = tnum_subreg(dst_reg->var_off);
+	struct tnum src_subreg = tnum_subreg(src_reg->var_off);
 
 	__scalar32_min_max_lsh(dst_reg, umin_val, umax_val);
-	dst_reg->var_off = tnum_subreg(tnum_lshift(subreg, umin_val));
+	dst_reg->var_off = tnum_subreg(tnum_shl(dst_subreg, src_subreg, 32));
 	/* Not required but being careful mark reg64 bounds as unknown so
 	 * that we are forced to pick them up from tnum and zext later and
 	 * if some path skips this step we are still safe.
@@ -8413,7 +8414,7 @@ static void scalar_min_max_lsh(struct bpf_reg_state *dst_reg,
 	__scalar64_min_max_lsh(dst_reg, umin_val, umax_val);
 	__scalar32_min_max_lsh(dst_reg, umin_val, umax_val);
 
-	dst_reg->var_off = tnum_lshift(dst_reg->var_off, umin_val);
+	dst_reg->var_off = tnum_shl(dst_reg->var_off, src_reg->var_off, 64);
 	/* We may learn something more from the var_off */
 	__update_reg_bounds(dst_reg);
 }
@@ -8421,7 +8422,8 @@ static void scalar_min_max_lsh(struct bpf_reg_state *dst_reg,
 static void scalar32_min_max_rsh(struct bpf_reg_state *dst_reg,
 				 struct bpf_reg_state *src_reg)
 {
-	struct tnum subreg = tnum_subreg(dst_reg->var_off);
+	struct tnum dst_subreg = tnum_subreg(dst_reg->var_off);
+	struct tnum src_subreg = tnum_subreg(src_reg->var_off);
 	u32 umax_val = src_reg->u32_max_value;
 	u32 umin_val = src_reg->u32_min_value;
 
@@ -8442,7 +8444,7 @@ static void scalar32_min_max_rsh(struct bpf_reg_state *dst_reg,
 	dst_reg->s32_min_value = S32_MIN;
 	dst_reg->s32_max_value = S32_MAX;
 
-	dst_reg->var_off = tnum_rshift(subreg, umin_val);
+	dst_reg->var_off = tnum_lshr(dst_subreg, src_subreg, 32);
 	dst_reg->u32_min_value >>= umax_val;
 	dst_reg->u32_max_value >>= umin_val;
 
@@ -8472,7 +8474,7 @@ static void scalar_min_max_rsh(struct bpf_reg_state *dst_reg,
 	 */
 	dst_reg->smin_value = S64_MIN;
 	dst_reg->smax_value = S64_MAX;
-	dst_reg->var_off = tnum_rshift(dst_reg->var_off, umin_val);
+	dst_reg->var_off = tnum_lshr(dst_reg->var_off, src_reg->var_off, 64);
 	dst_reg->umin_value >>= umax_val;
 	dst_reg->umax_value >>= umin_val;
 
@@ -8534,6 +8536,12 @@ static void scalar_min_max_arsh(struct bpf_reg_state *dst_reg,
 	__update_reg_bounds(dst_reg);
 }
 
+static bool reg_state_ok(struct bpf_reg_state *reg)
+{
+	return (reg->smin_value < 0 || (reg->var_off.value | reg->var_off.mask) < (1ull << 63ull)) &&
+		(reg->s32_min_value < 0 || (u32)(reg->var_off.value | reg->var_off.mask) < (1u << 31u));
+}
+
 /* WARNING: This function does calculations on 64-bit values, but the actual
  * execution may occur on 32-bit values. Therefore, things like bitshifts
  * need extra checks in the 32-bit case.
@@ -8588,8 +8596,15 @@ static int adjust_scalar_min_max_vals(struct bpf_verifier_env *env,
 		}
 	}
 
+	if (!reg_state_ok(dst_reg) || !reg_state_ok(&src_reg)) {
+		pr_err("Error: BPF verifier internal error!\nOffending instruction: %lu\n", insn - env->prog->insnsi);
+		print_hex_dump(KERN_ERR, "bpf_prog: ", DUMP_PREFIX_OFFSET, 16, 1, env->prog->insnsi, sizeof(struct bpf_insn) * env->prog->len, false);
+		panic("bpf verifier internal error");
+		return -EINVAL;
+	}
+
 	if (!src_known &&
-	    opcode != BPF_ADD && opcode != BPF_SUB && opcode != BPF_AND) {
+	    opcode != BPF_ADD && opcode != BPF_SUB && opcode != BPF_AND && opcode != BPF_LSH && opcode != BPF_RSH) {
 		__mark_reg_unknown(env, dst_reg);
 		return 0;
 	}
